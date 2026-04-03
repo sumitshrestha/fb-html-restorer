@@ -17,10 +17,22 @@ When you save a webpage "Complete" in browsers like Firefox, the layout often br
 ## 🚀 Getting Started
 
 ### 1. Prerequisites
-Ensure you have **Python 3.8+** installed. Then, install the required parsing libraries:
+Ensure you have **Python 3.8+** installed. Then create a virtual environment and install the required parsing libraries.
+
+#### **On Windows (PowerShell):**
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+```
+
+#### **On Linux/Mac (Bash):**
 
 ```bash
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
 ```
 
 ### 2. Setup
