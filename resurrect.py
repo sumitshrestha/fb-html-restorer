@@ -12,6 +12,7 @@ INPUT_HTML = os.getenv("INPUT_HTML", "index.html")
 LOCAL_FILES_DIR = os.getenv("LOCAL_FILES_DIR", "").strip()
 OUTPUT_FILE = os.getenv("OUTPUT_FILE", "resurrected_archive.html")
 TIMESTAMP = os.getenv("WAYBACK_TIMESTAMP", "20151201")
+INLINE_LOCAL_CSS = os.getenv("INLINE_LOCAL_CSS", "1")
 
 
 class MementoMessenger:
@@ -34,6 +35,11 @@ class MementoMessenger:
         self.output_file = os.path.join(self.output_dir, output_name)
         self.wayback_prefix = f"https://web.archive.org/web/{timestamp}id_/"
         self.fb_base = "https://www.facebook.com/"
+        self.inline_local_css = INLINE_LOCAL_CSS.strip().lower() not in {
+            "0",
+            "false",
+            "no",
+        }
 
     def _is_ignored_url(self, value):
         if not value:
@@ -103,6 +109,35 @@ class MementoMessenger:
 
         return self._to_wayback_url(original_url), "Remote"
 
+    def _rewrite_css_content(self, css_content, css_file_path):
+        def replace_css_url(match):
+            quote = match.group(1)
+            raw_url = match.group(2).strip().strip('"\'')
+
+            if self._is_ignored_url(raw_url):
+                return match.group(0)
+
+            parsed = urlparse(raw_url)
+            if parsed.scheme in {"http", "https"}:
+                return match.group(0)
+
+            css_dir = os.path.dirname(css_file_path)
+            local_candidate = os.path.normpath(
+                os.path.join(css_dir, unquote(parsed.path or ""))
+            )
+            if os.path.exists(local_candidate):
+                relative_asset_path = os.path.relpath(local_candidate, self.output_dir).replace(
+                    "\\", "/"
+                )
+                return f"url({quote}{relative_asset_path}{quote})"
+
+            if raw_url.startswith("/"):
+                return f"url({quote}{self._to_wayback_url(raw_url)}{quote})"
+
+            return match.group(0)
+
+        return re.sub(r'url\((["\']?)([^)]+)\1\)', replace_css_url, css_content)
+
     def repair(self):
         if not os.path.exists(self.html_path):
             print(
@@ -134,6 +169,14 @@ class MementoMessenger:
 
                 rewritten_url, source = self._rewrite_asset_url(original_url)
                 element[attr] = rewritten_url
+
+                # Local file:// resources can fail to load with CORS/SRI attributes.
+                if source == "Local":
+                    if element.has_attr("crossorigin"):
+                        del element["crossorigin"]
+                    if element.has_attr("integrity"):
+                        del element["integrity"]
+
                 if source == "Local":
                     local_count += 1
                 elif source == "Remote":
@@ -154,6 +197,35 @@ class MementoMessenger:
 
                 new_style = re.sub(r'url\((["\']?)([^)]+)\1\)', replace_style_url, style_content)
                 element["style"] = new_style
+
+        if self.inline_local_css:
+            for link in soup.find_all("link", href=True):
+                rel_values = [value.lower() for value in link.get("rel", [])]
+                if "stylesheet" not in rel_values:
+                    continue
+
+                href = link.get("href", "")
+                if not href or href.startswith("http"):
+                    continue
+
+                css_path = os.path.normpath(
+                    os.path.join(self.output_dir, href.replace("/", os.sep))
+                )
+                if not os.path.exists(css_path):
+                    continue
+
+                try:
+                    with open(css_path, "r", encoding="utf-8", errors="ignore") as css_file:
+                        css_content = css_file.read()
+                except OSError:
+                    continue
+
+                css_content = self._rewrite_css_content(css_content, css_path)
+                style_tag = soup.new_tag("style")
+                style_tag["data-inlined-from"] = href
+                style_tag.string = css_content
+                link.replace_with(style_tag)
+                print(f"[InlineCSS] Inlined: {href[:50]}...")
 
         os.makedirs(self.output_dir, exist_ok=True)
 
