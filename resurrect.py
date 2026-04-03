@@ -9,7 +9,7 @@ from urllib.parse import unquote, urljoin, urlparse
 # export INPUT_HTML="your_file.html" (Bash)
 
 INPUT_HTML = os.getenv("INPUT_HTML", "index.html")
-LOCAL_FILES_DIR = os.getenv("LOCAL_FILES_DIR", "index_files")
+LOCAL_FILES_DIR = os.getenv("LOCAL_FILES_DIR", "").strip()
 OUTPUT_FILE = os.getenv("OUTPUT_FILE", "resurrected_archive.html")
 TIMESTAMP = os.getenv("WAYBACK_TIMESTAMP", "20151201")
 
@@ -18,11 +18,17 @@ class MementoMessenger:
     def __init__(self, html_path, files_dir, timestamp):
         self.html_path = os.path.abspath(html_path)
         self.html_dir = os.path.dirname(self.html_path)
-        self.files_dir = files_dir
-        if os.path.isabs(files_dir):
-            self.files_dir_path = files_dir
+
+        html_stem = os.path.splitext(os.path.basename(self.html_path))[0]
+        default_files_dir = f"{html_stem}_files"
+        self.files_dir = files_dir or default_files_dir
+
+        if os.path.isabs(self.files_dir):
+            self.files_dir_path = self.files_dir
         else:
-            self.files_dir_path = os.path.join(self.html_dir, files_dir)
+            self.files_dir_path = os.path.join(self.html_dir, self.files_dir)
+
+        self.files_dir_exists = os.path.isdir(self.files_dir_path)
         output_name = os.path.basename(OUTPUT_FILE)
         self.output_dir = os.path.join(self.html_dir, "resurrected")
         self.output_file = os.path.join(self.output_dir, output_name)
@@ -59,10 +65,13 @@ class MementoMessenger:
             if normalized_path.startswith(prefix):
                 suffix = normalized_path[len(prefix) :]
                 candidates.append(os.path.normpath(os.path.join(self.files_dir_path, suffix)))
+                candidates.append(os.path.normpath(os.path.join(self.html_dir, suffix)))
 
             basename = os.path.basename(normalized_path)
             if basename:
                 candidates.append(os.path.normpath(os.path.join(self.files_dir_path, basename)))
+                # Flat export fallback: assets are next to the HTML file.
+                candidates.append(os.path.normpath(os.path.join(self.html_dir, basename)))
 
         checked = set()
         for candidate in candidates:
@@ -106,7 +115,16 @@ class MementoMessenger:
         with open(self.html_path, "r", encoding="utf-8", errors="ignore") as f:
             soup = BeautifulSoup(f, "html.parser")
 
+        if not self.files_dir_exists:
+            print(
+                f"[Info] Local asset folder not found at: {self.files_dir_path}. "
+                "Trying flat-file fallback and Wayback recovery."
+            )
+
         asset_tags = {"link": "href", "script": "src", "img": "src", "source": "src"}
+        local_count = 0
+        remote_count = 0
+        ignored_count = 0
 
         for tag_name, attr in asset_tags.items():
             for element in soup.find_all(tag_name):
@@ -116,6 +134,12 @@ class MementoMessenger:
 
                 rewritten_url, source = self._rewrite_asset_url(original_url)
                 element[attr] = rewritten_url
+                if source == "Local":
+                    local_count += 1
+                elif source == "Remote":
+                    remote_count += 1
+                else:
+                    ignored_count += 1
                 print(f"[{source}] {tag_name}.{attr}: {original_url[:50]}...")
 
         # Fix inline styles (background images)
@@ -137,6 +161,15 @@ class MementoMessenger:
             f.write(str(soup))
 
         print("-" * 40)
+        print(
+            f"Asset summary -> Local: {local_count}, Remote: {remote_count}, Ignored: {ignored_count}"
+        )
+        if local_count == 0:
+            print(
+                "Warning: No local CSS/JS/image assets were found. "
+                "If the page still looks broken, place the '*_files' folder next to the input HTML "
+                "or put the exported asset files in the same folder as the HTML."
+            )
         print(f"Success! Generated: {self.output_file}")
 
 

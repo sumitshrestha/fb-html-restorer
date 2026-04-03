@@ -43,10 +43,12 @@ The repaired archive is written to a `resurrected` folder created beside your in
 ### 3. Execution
 The script uses environment variables to identify your specific archive. Set them in your terminal before running:
 
+`LOCAL_FILES_DIR` is optional. If omitted, the script automatically tries `<input_html_name>_files` and also tries a flat-file layout where assets are in the same folder as the HTML.
+
 #### **On Windows (PowerShell):**
 ```powershell
 $env:INPUT_HTML = "Your_Archive_Name.html"
-$env:LOCAL_FILES_DIR = "Your_Archive_Name_files"
+$env:LOCAL_FILES_DIR = "Your_Archive_Name_files"  # optional
 $env:WAYBACK_TIMESTAMP = "20151201"  # YYYYMMDD format
 
 python resurrect.py
@@ -55,7 +57,7 @@ python resurrect.py
 #### **On Linux/Mac (Bash):**
 ```bash
 export INPUT_HTML="Your_Archive_Name.html"
-export LOCAL_FILES_DIR="Your_Archive_Name_files"
+export LOCAL_FILES_DIR="Your_Archive_Name_files"  # optional
 export WAYBACK_TIMESTAMP="20151201"
 
 python resurrect.py
