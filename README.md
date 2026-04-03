@@ -36,7 +36,9 @@ python -m pip install -r requirements.txt
 ```
 
 ### 2. Setup
-Place your `.html` file and its corresponding `_files` folder in the same directory as `resurrect.py`.
+Place your `.html` file and its corresponding `_files` folder together in the same directory.
+
+The repaired archive is written to a `resurrected` folder created beside your input HTML file.
 
 ### 3. Execution
 The script uses environment variables to identify your specific archive. Set them in your terminal before running:
@@ -65,7 +67,7 @@ python resurrect.py
 The script performs a "Deep Scan" of your HTML file:
 1.  **Local Check:** It looks for every image, script, and stylesheet in your `$LOCAL_FILES_DIR`.
 2.  **Remote Patching:** If an asset is missing (common with "Save Page As" errors), it constructs a request to the Wayback Machine using your provided `$WAYBACK_TIMESTAMP`.
-3.  **UI Reconstruction:** It outputs a new file (default: `resurrected_archive.html`) that combines both sources into a functional, nostalgically accurate UI.
+3.  **UI Reconstruction:** It outputs a new file (default: `resurrected_archive.html`) inside a `resurrected` folder next to your source HTML, combining both sources into a functional, nostalgically accurate UI.
 
 ---
 

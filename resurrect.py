@@ -16,8 +16,16 @@ TIMESTAMP = os.getenv("WAYBACK_TIMESTAMP", "20151201")
 
 class MementoMessenger:
     def __init__(self, html_path, files_dir, timestamp):
-        self.html_path = html_path
+        self.html_path = os.path.abspath(html_path)
+        self.html_dir = os.path.dirname(self.html_path)
         self.files_dir = files_dir
+        if os.path.isabs(files_dir):
+            self.files_dir_path = files_dir
+        else:
+            self.files_dir_path = os.path.join(self.html_dir, files_dir)
+        output_name = os.path.basename(OUTPUT_FILE)
+        self.output_dir = os.path.join(self.html_dir, "resurrected")
+        self.output_file = os.path.join(self.output_dir, output_name)
         self.wayback_prefix = f"https://web.archive.org/web/{timestamp}id_/"
         self.fb_base = "https://www.facebook.com/"
 
@@ -43,10 +51,13 @@ class MementoMessenger:
 
                 # Handle local file pathing
                 clean_local_name = unquote(original_url).split("/")[-1]
-                local_check_path = os.path.join(self.files_dir, clean_local_name)
+                local_check_path = os.path.join(self.files_dir_path, clean_local_name)
 
                 if os.path.exists(local_check_path):
-                    element[attr] = f"{self.files_dir}/{clean_local_name}"
+                    relative_asset_path = os.path.relpath(
+                        local_check_path, self.output_dir
+                    ).replace("\\", "/")
+                    element[attr] = relative_asset_path
                     print(f"[Local] Kept: {clean_local_name}")
                 else:
                     full_url = original_url
@@ -67,11 +78,13 @@ class MementoMessenger:
                 )
                 element["style"] = new_style
 
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        with open(self.output_file, "w", encoding="utf-8") as f:
             f.write(soup.prettify())
 
         print("-" * 40)
-        print(f"Success! Generated: {OUTPUT_FILE}")
+        print(f"Success! Generated: {self.output_file}")
 
 
 if __name__ == "__main__":
