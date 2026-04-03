@@ -1,7 +1,7 @@
 import os
 import re
 from bs4 import BeautifulSoup
-from urllib.parse import unquote
+from urllib.parse import unquote, urljoin, urlparse
 
 # --- CONFIGURATION VIA ENVIRONMENT VARIABLES ---
 # To run this, set these in your terminal first:
@@ -29,6 +29,71 @@ class MementoMessenger:
         self.wayback_prefix = f"https://web.archive.org/web/{timestamp}id_/"
         self.fb_base = "https://www.facebook.com/"
 
+    def _is_ignored_url(self, value):
+        if not value:
+            return True
+
+        normalized = value.strip()
+        if normalized.startswith("#"):
+            return True
+
+        parsed = urlparse(normalized)
+        return parsed.scheme in {"data", "javascript", "mailto", "tel"}
+
+    def _resolve_local_asset_path(self, original_url):
+        parsed = urlparse(original_url)
+        raw_path = unquote(parsed.path or "")
+        normalized_path = raw_path.replace("\\", "/")
+        normalized_path = re.sub(r"^\./", "", normalized_path)
+
+        candidates = []
+
+        if normalized_path:
+            candidates.append(os.path.normpath(os.path.join(self.html_dir, normalized_path)))
+            candidates.append(
+                os.path.normpath(os.path.join(self.files_dir_path, normalized_path.lstrip("/")))
+            )
+
+            files_dir_name = os.path.basename(self.files_dir_path).replace("\\", "/")
+            prefix = f"{files_dir_name}/"
+            if normalized_path.startswith(prefix):
+                suffix = normalized_path[len(prefix) :]
+                candidates.append(os.path.normpath(os.path.join(self.files_dir_path, suffix)))
+
+            basename = os.path.basename(normalized_path)
+            if basename:
+                candidates.append(os.path.normpath(os.path.join(self.files_dir_path, basename)))
+
+        checked = set()
+        for candidate in candidates:
+            if candidate in checked:
+                continue
+            checked.add(candidate)
+            if os.path.exists(candidate):
+                return candidate
+
+        return None
+
+    def _to_wayback_url(self, original_url):
+        parsed = urlparse(original_url)
+        if parsed.scheme in {"http", "https"}:
+            full_url = original_url
+        else:
+            full_url = urljoin(self.fb_base, original_url)
+
+        return self.wayback_prefix + full_url
+
+    def _rewrite_asset_url(self, original_url):
+        if self._is_ignored_url(original_url):
+            return original_url, "Ignored"
+
+        local_path = self._resolve_local_asset_path(original_url)
+        if local_path:
+            relative_asset_path = os.path.relpath(local_path, self.output_dir).replace("\\", "/")
+            return relative_asset_path, "Local"
+
+        return self._to_wayback_url(original_url), "Remote"
+
     def repair(self):
         if not os.path.exists(self.html_path):
             print(
@@ -49,39 +114,27 @@ class MementoMessenger:
                 if not original_url:
                     continue
 
-                # Handle local file pathing
-                clean_local_name = unquote(original_url).split("/")[-1]
-                local_check_path = os.path.join(self.files_dir_path, clean_local_name)
-
-                if os.path.exists(local_check_path):
-                    relative_asset_path = os.path.relpath(
-                        local_check_path, self.output_dir
-                    ).replace("\\", "/")
-                    element[attr] = relative_asset_path
-                    print(f"[Local] Kept: {clean_local_name}")
-                else:
-                    full_url = original_url
-                    if not original_url.startswith("http"):
-                        full_url = self.fb_base + original_url.lstrip("/")
-
-                    element[attr] = self.wayback_prefix + full_url
-                    print(f"[Remote] Patched: {original_url[:50]}...")
+                rewritten_url, source = self._rewrite_asset_url(original_url)
+                element[attr] = rewritten_url
+                print(f"[{source}] {tag_name}.{attr}: {original_url[:50]}...")
 
         # Fix inline styles (background images)
         for element in soup.find_all(style=True):
             style_content = element["style"]
             if "url(" in style_content:
-                new_style = re.sub(
-                    r'url\((["\']?)([^)]+)\1\)',
-                    rf"url(\1{self.wayback_prefix}{self.fb_base}\2\1)",
-                    style_content,
-                )
+                def replace_style_url(match):
+                    quote = match.group(1)
+                    raw_url = match.group(2).strip().strip('"\'')
+                    rewritten_url, _ = self._rewrite_asset_url(raw_url)
+                    return f"url({quote}{rewritten_url}{quote})"
+
+                new_style = re.sub(r'url\((["\']?)([^)]+)\1\)', replace_style_url, style_content)
                 element["style"] = new_style
 
         os.makedirs(self.output_dir, exist_ok=True)
 
         with open(self.output_file, "w", encoding="utf-8") as f:
-            f.write(soup.prettify())
+            f.write(str(soup))
 
         print("-" * 40)
         print(f"Success! Generated: {self.output_file}")
